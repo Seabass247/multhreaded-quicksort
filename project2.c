@@ -353,8 +353,10 @@ int main(int argc, char *argv[])
             params->array = &array[segments[i].lo];
             params->seg = segments[i];
 
-            if(threads_running < g_MAXTHREADS)
+            if(threads_running < g_MAXTHREADS) {
+                printf("(%d, %d, %d)\n", params->seg.lo, params->seg.hi, params->seg.size);
                 pthread_create(&thread_ids[threads_running++], NULL, sortThread, (void*)params);
+            }
             // if(isSorted(&array[segments[i].lo], segments[i].size)) {
             //     printf("\n(%d)Array is sorted\n", i);
             // } else {
