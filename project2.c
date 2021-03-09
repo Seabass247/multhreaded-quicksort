@@ -190,6 +190,20 @@ void* sortThread(void* ptr) {
 
 int main(int argc, char *argv[])
 {
+	// Time declarations
+	clock_t all_cpu_start, all_cpu_end,
+            craete_start, create_end,
+        	init_start, init_end,
+            scramble_start, scramble_end, 
+            sortCPU_start, sortCPU_end,
+			p_start, p_end;
+	struct timeval 	all_wall_start, all_wall_end, sortWALL_start, sortWALL_end;
+	double 	create_time, init_time, shuffle_time, part_time,
+			sort_wall_total, sort_cpu_total, wall_total, cpu_total;
+
+	all_cpu_start = clock();
+	gettimeofday(&all_wall_start, NULL);
+
     char* resultPtr; // An pointer that would be NULL for failed number conversions in `strtoull` (but we're not going to check)
     
     int num_args = argc - 1;
@@ -345,7 +359,6 @@ int main(int argc, char *argv[])
 
         pthread_t thread_ids[g_MAXTHREADS];
         int32 threads_running = 0;
-        // DEBUG: simulate threads iteratively (TODO: replace with multithreading)
         for(int32 i = 0; i < pieces_count; i++) {
             //QuickSort(&array[segments[i].lo], 0, segments[i].size - 1);
 
@@ -354,6 +367,11 @@ int main(int argc, char *argv[])
             params->seg = segments[i];
 
             if(threads_running < g_MAXTHREADS) {
+                if(!threads_running) { // start sorting wall clock on first thread creation
+                    gettimeofday(&sortWALL_start, NULL);
+                    sortCPU_start = clock();
+                }
+
                 printf("(%d, %d, %d)\n", params->seg.lo, params->seg.hi, params->seg.size);
                 pthread_create(&thread_ids[threads_running++], NULL, sortThread, (void*)params);
             }
@@ -369,8 +387,7 @@ int main(int argc, char *argv[])
         while(threads_running) {
             for(int32 i = 0; i < g_MAXTHREADS; i++) {
                 if(pthread_tryjoin_np(thread_ids[i], NULL) == 0) {
-                    threads_running--; // Thread i finished...
-                    //printf("Thread %d finished...\n", i);
+                    threads_running--; // Thread i finished, that's one less thread running
                     if(seg_count < g_PIECES) { // if we are here...
                         // ...then seg_count segments have already begun to be sorted in threads, but
                         // there is a total g_PIECES to sort: start another sort on an available thread
@@ -382,19 +399,35 @@ int main(int argc, char *argv[])
                         printf("(%d, %d, %d)\n", params->seg.lo, params->seg.hi, params->seg.size);
                         pthread_create(&thread_ids[i], NULL, sortThread, (void*)params);
 
-                        threads_running++;
-                        seg_count++;
+                        threads_running++; // another thread is now running
+                        seg_count++; // another segment has begun to be sorted
                     }
                 }
             }
 
         }
 
-        if(isSorted(array, g_SIZE)) {
-            printf("\nEntire array is sorted\n");
-        } else {
-            printf("\n\nEntire array is NOT sorted!\n");
-        }
+	sortCPU_end = clock();
+	gettimeofday(&sortWALL_end, NULL);
+
+    // Printing values
+	sort_wall_total = ((double)sortWALL_end.tv_sec-(double)sortWALL_start.tv_sec) + ((double)sortWALL_end.tv_usec-(double)sortWALL_start.tv_usec)/1000000;
+	sort_cpu_total = ((double)sortCPU_end - (double)sortCPU_start)/CLOCKS_PER_SEC;
+	wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
+	cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
+    // J - SORTING-WALL-CLOCK
+    // K - SORTING-CPU
+    // L - START-TO-FINISH WALL-CLOCK
+    // M - START-TO-FINISH CPU
+    printf("    SIZE    THRESHOLD SD PC T CREATE   INIT  SHUFFLE   PART  SrtWall Srt CPU ALLWall ALL CPU\n");
+	printf("  --------- --------- -- -- - ------ ------- ------- ------- ------- ------- ------- -------\n");
+	printf("F:%9d %9d %2d %2d %1d %0.3f  %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f\n",g_SIZE,g_THRESHOLD,g_SEED, g_PIECES,
+        g_MAXTHREADS, create_time, init_time, shuffle_time, part_time, sort_wall_total, sort_cpu_total, wall_total, cpu_total);
+        // if(isSorted(array, g_SIZE)) {
+        //     printf("\nEntire array is sorted\n");
+        // } else {
+        //     printf("\n\nEntire array is NOT sorted!\n");
+        // }
     }
 
     return 0;
