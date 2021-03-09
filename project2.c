@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <sys/types.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,7 +7,7 @@
 #include <stdbool.h> 
 #include <pthread.h>
 #include <errno.h>
-
+#include <sys/time.h>
 typedef int int32;
 
 typedef char uint8;
@@ -17,8 +18,6 @@ int32 g_SEED = 0;
 char g_MULTITHREAD;
 int32 g_PIECES = 10;
 int32 g_MAXTHREADS = 4;
-
-int pthread_tryjoin_np(); // NOTE: for getting rid of compiler warning
 
 void debug_print_array(char* name, int32* array, int32 n)
 {
@@ -192,11 +191,11 @@ int main(int argc, char *argv[])
 {
 	// Time declarations
 	clock_t all_cpu_start, all_cpu_end,
-            craete_start, create_end,
+            create_start, create_end,
         	init_start, init_end,
             scramble_start, scramble_end, 
             sortCPU_start, sortCPU_end,
-			p_start, p_end;
+			part_start, part_end;
 	struct timeval 	all_wall_start, all_wall_end, sortWALL_start, sortWALL_end;
 	double 	create_time, init_time, shuffle_time, part_time,
 			sort_wall_total, sort_cpu_total, wall_total, cpu_total;
@@ -240,7 +239,6 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Error: failed to convert argument to integer\n");
                 exit(1);
             }
-            //printf("MULTITHREAD=%s\n", g_MULTITHREAD);
 
             if(num_args >= 5) {
                 g_PIECES = strtoull(argv[5], &resultPtr, 10); // convert the string of the input number to an int
@@ -248,7 +246,6 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "Error: failed to convert argument to integer\n");
                     exit(1);
                 }
-                //printf("PIECES=%d\n", g_PIECES);
 
                 if(num_args >= 6) {
                     g_MAXTHREADS = strtoull(argv[6], &resultPtr, 10); // convert the string of the input number to an int
@@ -256,9 +253,6 @@ int main(int argc, char *argv[])
                         fprintf(stderr, "Error: failed to convert argument to integer\n");
                         exit(1);
                     }
-
-                    printf("\nParsed MAXTHREADS=%d\n", g_MAXTHREADS);
-
                 }
             }
         }
@@ -272,32 +266,36 @@ int main(int argc, char *argv[])
     else if (g_SEED == -1) // else if seed is set to -1, seed random number generator with clock
         srand(clock());
 
-    int32* array = (int32*)malloc(g_SIZE * sizeof(int32)); // init array
-    for(int32 i = 0; i < g_SIZE; i++) { // create array
+    create_start = clock();
+    int32* array = (int32*)malloc(g_SIZE * sizeof(int32)); // create array
+    create_end = clock();
+
+    init_start = clock();
+    for(int32 i = 0; i < g_SIZE; i++) { // initialize array
         array[i] = i;
     }
+    init_end = clock();
+
+    scramble_start = clock();
     scramble_array(array, g_SIZE); // scramble array
+    scramble_end = clock();
 
-    if(g_MULTITHREAD == 'n') { // Do single-threaded sorting
-        //printf("\nDo single-threaded sort\n");
+    if(g_MULTITHREAD == 'n' || g_MULTITHREAD == 'N') { // Do single-threaded sorting
+        g_PIECES = 0;
+        g_MAXTHREADS = 0;
 
-        //debug_print_array("unsorted_array", array, g_arraySize);
-
+        sortCPU_start = clock(); // begin measuring..
+        gettimeofday(&sortWALL_start, NULL); //..sorting time
         QuickSort(array, 0, g_SIZE - 1);
 
-        //debug_print_array("sorted_array", array, g_arraySize);
+        // Gather time statistics
+        all_cpu_end = clock();
+        gettimeofday(&all_wall_end, NULL);
+        wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
+        cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
 
-        if(isSorted(array, g_SIZE)) {
-            printf("\nArray is sorted\n");
-        } else {
-            printf("\n\nArray is NOT sorted!\n");
-        }
     } else { //  Do multi-threaded sorting
-        //printf("\nDo multi-threaded sort\n");
-
         int32 pieces_count = 0;
-
-        printf("\nSort %d pieces with %d threads\n", g_PIECES, g_MAXTHREADS);
 
         Segment segments[g_PIECES];
         Segment seg_hi = {0};
@@ -308,6 +306,8 @@ int main(int argc, char *argv[])
         next_biggest_seg.hi = g_SIZE - 1;
         next_biggest_seg.size = g_SIZE;
 
+        // Begin partitioning...
+        part_start = clock();
         if(g_PIECES == 1) { // if the desired number of pieces is 1, just add one segment...
             //..which represents the entire array
             Segment single = {0};
@@ -349,8 +349,8 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        
         SortSegments(segments, pieces_count);
+        part_end = clock();
 
         // printf("\nTotal pieces=%d\n", pieces_count);
         // for(int32 i = 0; i < pieces_count; i++) {
@@ -358,6 +358,7 @@ int main(int argc, char *argv[])
         // }
 
         pthread_t thread_ids[g_MAXTHREADS];
+        pthread_attr_t thread_attrs[g_MAXTHREADS];
         int32 threads_running = 0;
         for(int32 i = 0; i < pieces_count; i++) {
             //QuickSort(&array[segments[i].lo], 0, segments[i].size - 1);
@@ -372,8 +373,10 @@ int main(int argc, char *argv[])
                     sortCPU_start = clock();
                 }
 
+                pthread_attr_init(&thread_attrs[threads_running]);
                 printf("(%d, %d, %d)\n", params->seg.lo, params->seg.hi, params->seg.size);
-                pthread_create(&thread_ids[threads_running++], NULL, sortThread, (void*)params);
+                pthread_create(&thread_ids[threads_running], NULL, sortThread, (void*)params);
+                threads_running++; // another thread is now running
             }
             // if(isSorted(&array[segments[i].lo], segments[i].size)) {
             //     printf("\n(%d)Array is sorted\n", i);
@@ -386,7 +389,9 @@ int main(int argc, char *argv[])
         int32 seg_count = threads_running;
         while(threads_running) {
             for(int32 i = 0; i < g_MAXTHREADS; i++) {
+                bool none_finished = true;
                 if(pthread_tryjoin_np(thread_ids[i], NULL) == 0) {
+                    none_finished = false;
                     threads_running--; // Thread i finished, that's one less thread running
                     if(seg_count < g_PIECES) { // if we are here...
                         // ...then seg_count segments have already begun to be sorted in threads, but
@@ -396,6 +401,7 @@ int main(int argc, char *argv[])
                         Parameters *params = (Parameters *) malloc(sizeof(Parameters)); 
                         params->array = &array[segments[seg_count].lo];
                         params->seg = segments[seg_count];
+                        pthread_attr_init(&thread_attrs[i]);
                         printf("(%d, %d, %d)\n", params->seg.lo, params->seg.hi, params->seg.size);
                         pthread_create(&thread_ids[i], NULL, sortThread, (void*)params);
 
@@ -403,26 +409,14 @@ int main(int argc, char *argv[])
                         seg_count++; // another segment has begun to be sorted
                     }
                 }
+                if(none_finished) // if none have finished running, wait 50ms before polling again 
+                    usleep(50000);
             }
 
         }
 
-	sortCPU_end = clock();
-	gettimeofday(&sortWALL_end, NULL);
 
-    // Printing values
-	sort_wall_total = ((double)sortWALL_end.tv_sec-(double)sortWALL_start.tv_sec) + ((double)sortWALL_end.tv_usec-(double)sortWALL_start.tv_usec)/1000000;
-	sort_cpu_total = ((double)sortCPU_end - (double)sortCPU_start)/CLOCKS_PER_SEC;
-	wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
-	cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
-    // J - SORTING-WALL-CLOCK
-    // K - SORTING-CPU
-    // L - START-TO-FINISH WALL-CLOCK
-    // M - START-TO-FINISH CPU
-    printf("    SIZE    THRESHOLD SD PC T CREATE   INIT  SHUFFLE   PART  SrtWall Srt CPU ALLWall ALL CPU\n");
-	printf("  --------- --------- -- -- - ------ ------- ------- ------- ------- ------- ------- -------\n");
-	printf("F:%9d %9d %2d %2d %1d %0.3f  %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f\n",g_SIZE,g_THRESHOLD,g_SEED, g_PIECES,
-        g_MAXTHREADS, create_time, init_time, shuffle_time, part_time, sort_wall_total, sort_cpu_total, wall_total, cpu_total);
+
         // if(isSorted(array, g_SIZE)) {
         //     printf("\nEntire array is sorted\n");
         // } else {
@@ -430,5 +424,32 @@ int main(int argc, char *argv[])
         // }
     }
 
+    all_cpu_end = clock();
+    sortCPU_end = clock();
+    gettimeofday(&sortWALL_end, NULL);
+    gettimeofday(&all_wall_end, NULL);
+
+    // Get timing statistics
+    create_time = ((double)create_end - (double)create_start)/CLOCKS_PER_SEC;
+    init_time = ((double)init_end - (double)init_start)/CLOCKS_PER_SEC;
+    shuffle_time = ((double)scramble_end - (double)scramble_start)/CLOCKS_PER_SEC;
+    part_time = ((double)part_end - (double)part_start)/CLOCKS_PER_SEC;
+    sort_wall_total = ((double)sortWALL_end.tv_sec-(double)sortWALL_start.tv_sec) + ((double)sortWALL_end.tv_usec-(double)sortWALL_start.tv_usec)/1000000;
+    sort_cpu_total = ((double)sortCPU_end - (double)sortCPU_start)/CLOCKS_PER_SEC;
+    wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
+    cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
+
+    printf("    SIZE    THRESHOLD SD PC T CREATE   INIT  SHUFFLE   PART  SrtWall Srt CPU ALLWall ALL CPU\n");
+	printf("  --------- --------- -- -- - ------ ------- ------- ------- ------- ------- ------- -------\n");
+    if(g_SEED == 0) {
+        // if seed was not specified, format it as '00'
+        printf("F:%9d %9d %02d %2d %1d %0.3f  %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f\n",g_SIZE,g_THRESHOLD,g_SEED, g_PIECES,
+            g_MAXTHREADS, create_time, init_time, shuffle_time, part_time, sort_wall_total, sort_cpu_total, wall_total, cpu_total);
+    } else {
+        // if seed was not specified, format without leading zeros
+        printf("F:%9d %9d %2d %2d %1d %0.3f  %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f   %0.3f\n",g_SIZE,g_THRESHOLD,g_SEED, g_PIECES,
+            g_MAXTHREADS, create_time, init_time, shuffle_time, part_time, sort_wall_total, sort_cpu_total, wall_total, cpu_total);
+    }
+	   
     return 0;
 } // end main
