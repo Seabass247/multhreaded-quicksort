@@ -19,7 +19,7 @@ char g_MULTITHREAD;
 int32 g_PIECES = 10;
 int32 g_MAXTHREADS = 4;
 
-void debug_print_array(char* name, int32* array, int32 n)
+void _debug_print_array(char* name, int32* array, int32 n)
 {
     int32 loop;
 
@@ -29,18 +29,20 @@ void debug_print_array(char* name, int32* array, int32 n)
     printf("}");
 }
 
+// swaps each value in the array with another value at a random location
 void scramble_array(int32 *array, int32 n)
 {
     if(n > 1) {
         for(int i = n - 1; i > 0; i-- ) {
             int rand_i = (int)(rand() % n);
-            int tmp_j = array[rand_i];
+            int tmp_j = array[rand_i]; // swap value at rand_i with value at i
             array[rand_i] = array[i];
             array[i] = tmp_j;
         }
     }
 }
 
+// checks if the array is sorted in ascending order
 bool isSorted(int32* array, int32 n) {
     int32 i = 0;
     bool isSorted = true;
@@ -58,18 +60,20 @@ typedef struct {
     int32 lo;
     int32 hi;
     int32 size;
-} Segment;
+} Segment; // a structure created for conveniently passing segment data around
 
+// Partitions the array into two segments, first segment being [lo to j-1], second being [j+1 to hi]
+// where j is the returned value
 int Partition(int32* array, int32 lo, int32 hi) {
-
+    
     int32 pivot = (rand() % (hi - lo + 1)) + lo; // generate a random number in the range [lo, hi]
     int32 i = lo - 1;
     int32 j = hi + 1;
     int32 temp;
 
     do {
-        do i++; while(array[i] <= array[pivot]);
-        do j--; while(array[j] > array[pivot]);
+        do i++; while(array[i] <= array[pivot]); // move i to the first number that's greater than pivot
+        do j--; while(array[j] > array[pivot]); // move j to the first number that's less than or equal to pivot
 
         if(i < j) {
             temp = array[i];
@@ -81,40 +85,38 @@ int Partition(int32* array, int32 lo, int32 hi) {
             } else if(pivot == i) {
                 pivot = j;
             }
-        } else break;
+        } else break; // stop when i and j have crossed
     } while(true);
     
-    temp = array[pivot];
+    temp = array[pivot]; // swap pivot and j
     array[pivot] = array[j];
     array[j] = temp;
 
     return j;
 }
 
+// Built on top of Partition(), this function partitions the array, then builds
+// a lower segment object and upper segment object from a partition from lo to hi
 void GetPartitionSegments(int32* array, int32 lo, int32 hi, Segment* seg_lo, Segment* seg_hi) {
-    //printf("\nPartitioning %d -> %d (%d)...", lo, hi, hi - lo + 1);
     int32 j = Partition(array, lo, hi);
-    seg_lo->lo = lo;
-    seg_lo->hi = (j-1);
-    seg_lo->size = j - lo;
+    seg_lo->lo = lo; // lower segment starts at lo
+    seg_lo->hi = (j-1); // higher segments ends at j-1
+    seg_lo->size = j - lo; 
 
-    seg_hi->lo = j+1;
-    seg_hi->hi = hi;
+    seg_hi->lo = j+1; // upper segment starts at j+1
+    seg_hi->hi = hi; // upper segment ends at hi
     seg_hi->size = hi - j -1 + 1;
-
-    int32 total_size = seg_lo->size + seg_hi->size;
-    double lo_percent =((double)seg_lo->size / (double)total_size) * 100.0;
-    double hi_percent = ((double)seg_hi->size / (double)total_size) * 100.0;
-    //printf("result: %d - %d (%f / %f)", seg_lo->size, seg_hi->size, lo_percent, hi_percent);
 }
 
-void QuickSort(int32* array, int32 lo, int32 hi) {         
+// Sorts the array using a hybrid quicksort-shellsort algorithm approach- when the
+// segment size is below the specified threshold, the remaining segment is shellsorted
+void QuickSort(int32* array, int32 lo, int32 hi) {
 
     if (lo > hi) // nothing to do according to algorithm
         return;
 
-    int32 segment_size = hi - lo + 1;
-    int32* segment =  &array[lo];
+    int32 segment_size = hi - lo + 1; // get the size of this segment
+    int32* segment =  &array[lo]; // get a pointer to this segment of the array
     
     if(segment_size < 2) // the segment is 0 or 1 length- nothing to do
         return;
@@ -129,11 +131,11 @@ void QuickSort(int32* array, int32 lo, int32 hi) {
     }
 
     if(segment_size <= g_THRESHOLD) {
-        // if the segment size is at or below the threshold, shellsort it
+        // if the segment size is at or below the threshold, SHELLSORT it
         int32 i;
         int32 j;
         int32 k = 1;
-        while (k <= segment_size) k *= 2;
+        while (k <= segment_size) k *= 2; // generate the sequence used to shellsort
         k = (k / 2) - 1;
 
         do {
@@ -141,7 +143,7 @@ void QuickSort(int32* array, int32 lo, int32 hi) {
                 for(j = i; j >= 0; j -= k) {
                     if(segment[j] <= segment[j + k]) break;
                     else {
-                        int32 tmp = segment[j];
+                        int32 tmp = segment[j]; // swap j and j+k
                         segment[j] = segment[j + k];
                         segment[j + k] = tmp;
                     }
@@ -150,24 +152,26 @@ void QuickSort(int32* array, int32 lo, int32 hi) {
 
             k /= 2;
         } while (k > 0);
-        return;
+        return; // that's it, segment is sorted via shellsort, nothing else to do, so return
     }
 
-    if(lo < hi) {
+    if(lo < hi) { // don't continue recursively quicksorting for segments where lo < hi, because...
+                // ...according to the quicksort algorithm the array is trivially assorted
         int32 j = Partition(array, lo, hi);
         QuickSort(array, lo, j-1);
         QuickSort(array, j+1, hi);
     }
 }
 
+// Sorts segments by size in descending order
+// using the bubble sort algorithm
 void SortSegments(Segment array[], int32 n) {
-    // sort segments by size in descending order
-    // using the bubble sort algorithm
+
     int32 i, j; 
     for (i = 0; i < n-1; i++) {
         for (j = 0; j < n-i-1; j++) {
             if (array[j].size < array[j+1].size) {
-                Segment temp = array[j]; 
+                Segment temp = array[j]; // swap j and j+1
                 array[j] = array[j+1]; 
                 array[j+1] = temp; 
 
@@ -179,17 +183,19 @@ void SortSegments(Segment array[], int32 n) {
 typedef struct {
     int32* array;
     Segment seg;
-} Parameters;
+} Parameters; // a struct used to pass the necessary parameter to a sorting thread
 
+// function which threads will run
 void* sortThread(void* ptr) {
     Parameters* params;
-    params = (Parameters*)ptr;
+    params = (Parameters*)ptr; // get parameters passed into this thread
     QuickSort(params->array, 0, params->seg.size - 1);
 }
 
+// entry point to the program
 int main(int argc, char *argv[])
 {
-	// Time declarations
+	// Declare timing variables
 	clock_t all_cpu_start, all_cpu_end,
             create_start, create_end,
         	init_start, init_end,
@@ -200,59 +206,34 @@ int main(int argc, char *argv[])
 	double 	create_time, init_time, shuffle_time, part_time,
 			sort_wall_total, sort_cpu_total, wall_total, cpu_total;
 
-	all_cpu_start = clock();
-	gettimeofday(&all_wall_start, NULL);
+	all_cpu_start = clock(); // begin measuring total time elapsed for both CPU...
+	gettimeofday(&all_wall_start, NULL); // ...and WALL clock time
 
     char* resultPtr; // An pointer that would be NULL for failed number conversions in `strtoull` (but we're not going to check)
     
     int num_args = argc - 1;
-    if(num_args < 2) { // check for the command-line parameter: n0
+    if(num_args < 2) { // check that there are the minimum number of arguments needed to sort
         fprintf(stderr, "Error: not enough args\n");
         exit(1);
     }
 
-    g_SIZE = strtoull(argv[1], &resultPtr, 10); // convert the string of the input number to an int
-    if(resultPtr == NULL) {
-        fprintf(stderr, "Error: failed to convert argument to integer\n");
-        exit(1);
-    }
-    //printf("SIZE=%d\n", g_arraySize);
+    g_SIZE = atoi(argv[1]); // convert the string of the SIZE number to an int
 
-    g_THRESHOLD = strtoull(argv[2], &resultPtr, 10); // convert the string of the input number to an int
-    if(resultPtr == NULL) {
-        fprintf(stderr, "Error: failed to convert argument to integer\n");
-        exit(1);
-    }
-    //printf("THRESHOLD=%d\n", threshold_arg);
+    g_THRESHOLD = atoi(argv[2]); // convert the string of the THRESHOLD number to an int
 
     if(num_args >= 3 && num_args <= 6) {
-        g_SEED = strtoull(argv[3], &resultPtr, 10); // convert the string of the input number to an int
-        if(resultPtr == NULL) {
-            fprintf(stderr, "Error: failed to convert argument to integer\n");
-            exit(1);
-        }
-        //printf("SEED=%d\n", g_SEED);
+        g_SEED = atoi(argv[3]); // convert the string of the SEED number to an int
 
         if(num_args >= 4) {
-            g_MULTITHREAD = argv[4][0]; // convert the string of the input number to an int
-            if(resultPtr == NULL) {
-                fprintf(stderr, "Error: failed to convert argument to integer\n");
-                exit(1);
-            }
+            g_MULTITHREAD = argv[4][0]; // get the character of the MULTITHREAD argument
 
             if(num_args >= 5) {
-                g_PIECES = strtoull(argv[5], &resultPtr, 10); // convert the string of the input number to an int
-                if(resultPtr == NULL) {
-                    fprintf(stderr, "Error: failed to convert argument to integer\n");
-                    exit(1);
-                }
+                g_PIECES = atoi(argv[5]); // convert the string of the PIECES number to an int
+
 
                 if(num_args >= 6) {
-                    g_MAXTHREADS = strtoull(argv[6], &resultPtr, 10); // convert the string of the input number to an int
-                    if(resultPtr == NULL) {
-                        fprintf(stderr, "Error: failed to convert argument to integer\n");
-                        exit(1);
-                    }
+                    g_MAXTHREADS = atoi(argv[6]); // convert the string of the MAXTHREADS number to an int
+
                 }
             }
         }
@@ -281,24 +262,17 @@ int main(int argc, char *argv[])
     scramble_end = clock();
 
     if(g_MULTITHREAD == 'n' || g_MULTITHREAD == 'N') { // Do single-threaded sorting
-        g_PIECES = 0;
-        g_MAXTHREADS = 0;
+        g_PIECES = 0; // don't need these...
+        g_MAXTHREADS = 0; //...because we aren't using multi-threading
 
         sortCPU_start = clock(); // begin measuring..
         gettimeofday(&sortWALL_start, NULL); //..sorting time
         QuickSort(array, 0, g_SIZE - 1);
-
-        // Gather time statistics
-        all_cpu_end = clock();
-        gettimeofday(&all_wall_end, NULL);
-        wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
-        cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
-
     } else { //  Do multi-threaded sorting
         int32 pieces_count = 0;
 
-        Segment segments[g_PIECES];
-        Segment seg_hi = {0};
+        Segment segments[g_PIECES]; // create a list of PIECES segments
+        Segment seg_hi = {0}; 
         Segment seg_lo = {0};
 
         Segment next_biggest_seg = {0};
@@ -322,7 +296,6 @@ int main(int argc, char *argv[])
             // printf("\nThis next size=%d", next_biggest_seg.size);
                 GetPartitionSegments(array, next_biggest_seg.lo, next_biggest_seg.hi, &seg_lo, &seg_hi);
                 if(seg_lo.size >= seg_hi.size) { // lower segment is bigger...
-                    //printf("Lower segment is bigger, next[%d]: %d -> %d\n", pieces_count, seg_lo.lo, seg_lo.hi);
                     //... so partition the lower segment next
                     next_biggest_seg = seg_lo;
                     // and keep the hi (smaller) segment in the list
@@ -335,7 +308,6 @@ int main(int argc, char *argv[])
                     }
                 }
                 else {  // upper segment is bigger...
-                    //printf("Upper segment is bigger, next[%d]: %d -> %d\n", pieces_count, seg_hi.lo, seg_hi.hi);
                     //... so partition the upper segment next
                     next_biggest_seg = seg_hi;
                     // and keep the lo (smaller) segment in the list
@@ -352,16 +324,10 @@ int main(int argc, char *argv[])
         SortSegments(segments, pieces_count);
         part_end = clock();
 
-        // printf("\nTotal pieces=%d\n", pieces_count);
-        // for(int32 i = 0; i < pieces_count; i++) {
-        //     printf("%d -> %d, (%d)\n", segments[i].lo, segments[i].hi, segments[i].size);
-        // }
-
         pthread_t thread_ids[g_MAXTHREADS];
         pthread_attr_t thread_attrs[g_MAXTHREADS];
         int32 threads_running = 0;
         for(int32 i = 0; i < pieces_count; i++) {
-            //QuickSort(&array[segments[i].lo], 0, segments[i].size - 1);
 
             Parameters *params = (Parameters *) malloc(sizeof(Parameters)); 
             params->array = &array[segments[i].lo];
@@ -378,19 +344,14 @@ int main(int argc, char *argv[])
                 pthread_create(&thread_ids[threads_running], NULL, sortThread, (void*)params);
                 threads_running++; // another thread is now running
             }
-            // if(isSorted(&array[segments[i].lo], segments[i].size)) {
-            //     printf("\n(%d)Array is sorted\n", i);
-            // } else {
-            //     printf("\n\n(%d)Array is NOT sorted!\n", i);
-            // }
-            
+
         }
 
-        int32 seg_count = threads_running;
+        int32 seg_count = threads_running; // used for accessing the next-up segment from the segments array
         while(threads_running) {
             for(int32 i = 0; i < g_MAXTHREADS; i++) {
-                bool none_finished = true;
-                if(pthread_tryjoin_np(thread_ids[i], NULL) == 0) {
+                bool none_finished = true; // keep track of whether any threads have finished or not
+                if(pthread_tryjoin_np(thread_ids[i], NULL) == 0) { // poll each thread
                     none_finished = false;
                     threads_running--; // Thread i finished, that's one less thread running
                     if(seg_count < g_PIECES) { // if we are here...
@@ -415,13 +376,6 @@ int main(int argc, char *argv[])
 
         }
 
-
-
-        // if(isSorted(array, g_SIZE)) {
-        //     printf("\nEntire array is sorted\n");
-        // } else {
-        //     printf("\n\nEntire array is NOT sorted!\n");
-        // }
     }
 
     all_cpu_end = clock();
@@ -439,6 +393,7 @@ int main(int argc, char *argv[])
     wall_total = ((double)all_wall_end.tv_sec-(double)all_wall_start.tv_sec) + ((double)all_wall_end.tv_usec-(double)all_wall_start.tv_usec)/1000000;
     cpu_total = ((double)all_cpu_end - (double)all_cpu_start)/CLOCKS_PER_SEC;
 
+    // Print nicely formatted timing statistics
     printf("    SIZE    THRESHOLD SD PC T CREATE   INIT  SHUFFLE   PART  SrtWall Srt CPU ALLWall ALL CPU\n");
 	printf("  --------- --------- -- -- - ------ ------- ------- ------- ------- ------- ------- -------\n");
     if(g_SEED == 0) {
